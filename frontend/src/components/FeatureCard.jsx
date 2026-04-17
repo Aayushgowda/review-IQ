@@ -71,11 +71,11 @@ export default function FeatureCard({ feature, data, index = 0 }) {
   const confidenceColor = confidence > 0.7 ? '#00FFD1' : confidence > 0.4 ? '#F59E0B' : '#FF4B4B'
 
   return (
-    <div className={`glass-card p-6 group relative overflow-hidden ${status === 'Critical' ? 'critical-glow border-brand-red/20' : ''}`}>
-      <div className="flex items-start justify-between mb-6 relative z-10">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-white/[0.05] to-transparent border border-white/10 flex items-center justify-center text-text-secondary group-hover:text-teal transition-colors duration-500">
-            <Icon size={22} strokeWidth={1.5} />
+    <div className={`glass-card p-4 group relative overflow-hidden ${status === 'Critical' ? 'critical-glow border-brand-red/20' : ''}`}>
+      <div className="flex items-start justify-between mb-4 relative z-10">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-white/[0.05] to-transparent border border-white/10 flex items-center justify-center text-text-secondary group-hover:text-teal transition-colors duration-500">
+            <Icon size={18} strokeWidth={1.5} />
           </div>
           <div>
             <h3 className="text-sm font-syne font-bold text-text-primary tracking-tight">{label}</h3>
@@ -91,7 +91,7 @@ export default function FeatureCard({ feature, data, index = 0 }) {
         </div>
       </div>
 
-      <div className="space-y-4 mb-6 relative z-10">
+      <div className="space-y-3 mb-4 relative z-10">
         <SentimentBar label="Positive" value={positive} max={total} color="#00FFD1" delay={0.2} />
         <SentimentBar label="Negative" value={negative} max={total} color="#FF4B4B" delay={0.3} />
         <SentimentBar label="Neutral" value={neutral} max={total} color="#7C3AED" delay={0.4} />

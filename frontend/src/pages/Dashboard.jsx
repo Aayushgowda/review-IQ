@@ -130,15 +130,15 @@ export default function Dashboard() {
   const recentReviews = data.recent_reviews || []
 
   return (
-    <div className="space-y-10 pb-20">
+    <div className="space-y-6 pb-12">
       {/* Header Section */}
       <div className="flex items-end justify-between">
         <div>
-          <h1 className="text-4xl font-syne font-black text-white tracking-tight leading-none uppercase italic">
+          <h1 className="text-2xl font-syne font-black text-white tracking-tight leading-none uppercase italic">
             Intelligence <span className="text-teal not-italic">Dashboard</span>
           </h1>
-          <p className="text-text-muted mt-3 font-mono text-[10px] uppercase tracking-[0.3em] font-bold flex items-center gap-2">
-            <Activity size={12} className="text-teal" />
+          <p className="text-text-muted mt-2 font-mono text-[9px] uppercase tracking-[0.2em] font-bold flex items-center gap-2">
+            <Activity size={10} className="text-teal" />
             Live Analysis: {selectedProduct}
           </p>
         </div>
@@ -154,7 +154,7 @@ export default function Dashboard() {
       <AlertBanner alerts={alerts} />
 
       {/* Stat Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
           icon={MessageSquare}
           value={data.total_reviews}
@@ -186,15 +186,15 @@ export default function Dashboard() {
       </div>
 
       {/* Main Analysis Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Sentiment Analysis */}
-        <div className="lg:col-span-4 glass-card p-8 relative overflow-hidden">
+        <div className="lg:col-span-4 glass-card p-5 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-teal via-violet to-brand-blue opacity-50" />
           <h3 className="text-xs font-black text-text-muted uppercase tracking-[0.2em] mb-8 flex items-center gap-2">
              <Zap size={14} className="text-teal" />
              Sentiment Matrix
           </h3>
-          <div className="relative h-[240px]">
+          <div className="relative h-[180px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -232,7 +232,7 @@ export default function Dashboard() {
         </div>
 
         {/* Anomaly / Alerts List */}
-        <div className="lg:col-span-8 glass-card p-8 flex flex-col">
+        <div className="lg:col-span-8 glass-card p-5 flex flex-col">
           <div className="flex items-center justify-between mb-8">
             <h3 className="text-xs font-black text-text-muted uppercase tracking-[0.2em] flex items-center gap-2">
                <Activity size={14} className="text-brand-red" />
@@ -243,7 +243,7 @@ export default function Dashboard() {
             </span>
           </div>
 
-          <div className="flex-1 space-y-3 max-h-[360px] overflow-y-auto pr-2">
+          <div className="flex-1 space-y-3 max-h-[280px] overflow-y-auto pr-2">
             <AnimatePresence mode="popLayout">
               {alerts.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-text-muted space-y-4 py-10 opacity-40">
@@ -291,7 +291,7 @@ export default function Dashboard() {
       {/* Action Cards Centerpiece */}
       <AnimatePresence>
         {actionCards.length > 0 && (
-          <div className="space-y-6">
+          <div className="space-y-4">
             <div className="flex items-center gap-4">
               <div className="h-px flex-1 bg-gradient-to-r from-transparent to-white/10" />
               <h3 className="text-sm font-syne font-black text-text-primary uppercase tracking-[0.3em] italic flex items-center gap-3">
@@ -300,7 +300,7 @@ export default function Dashboard() {
               </h3>
               <div className="h-px flex-1 bg-gradient-to-l from-transparent to-white/10" />
             </div>
-            <div className="grid grid-cols-1 gap-6">
+            <div className="grid grid-cols-1 gap-4">
               {actionCards.map((card, i) => (
                 <ActionCard
                   key={card.id}
@@ -315,12 +315,12 @@ export default function Dashboard() {
       </AnimatePresence>
 
       {/* Feature Intelligence Matrix */}
-      <div className="space-y-6">
+      <div className="space-y-4">
         <h3 className="text-sm font-syne font-black text-white uppercase tracking-[0.3em] flex items-center gap-3">
           <LayoutGrid size={18} className="text-violet" />
           Feature Intelligence Matrix
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Object.entries(features).map(([key, val], i) => (
             <FeatureCard key={key} feature={key} data={val} index={i} />
           ))}

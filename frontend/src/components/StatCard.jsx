@@ -9,17 +9,17 @@ export default function StatCard({ icon: Icon, value, label, subtitle, color = '
   const isPositive = subtitle?.includes('+') || (isTrend && !subtitle?.includes('-'))
 
   return (
-    <div className="glass-card p-6 relative overflow-hidden group">
+    <div className="glass-card p-4 relative overflow-hidden group">
       {/* Background Glow Effect - simplified */}
       <div className="absolute -right-4 -top-4 w-24 h-24 bg-teal/5 rounded-full blur-2xl" />
       
       <div className="flex items-start justify-between relative z-10">
         <div 
-          className="w-12 h-12 rounded-2xl flex items-center justify-center relative overflow-hidden border border-white/10"
+          className="w-10 h-10 rounded-xl flex items-center justify-center relative overflow-hidden border border-white/10"
           style={{ background: `linear-gradient(135deg, ${color}20 0%, transparent 100%)` }}
         >
           <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-          {Icon && <Icon size={22} style={{ color: color }} className="drop-shadow-[0_0_8px_rgba(255,255,255,0.3)]" />}
+          {Icon && <Icon size={18} style={{ color: color }} className="drop-shadow-[0_0_8px_rgba(255,255,255,0.3)]" />}
         </div>
         
         {subtitle && (
@@ -34,11 +34,11 @@ export default function StatCard({ icon: Icon, value, label, subtitle, color = '
         )}
       </div>
 
-      <div className="mt-6 relative z-10">
+      <div className="mt-4 relative z-10">
         <div className="flex items-baseline gap-1">
-          <span className="text-4xl font-extrabold font-mono text-text-primary tracking-tighter drop-shadow-sm">
+          <p className="text-xl font-mono font-bold text-text-primary">
             {typeof value === 'number' ? animatedValue.toLocaleString() : value}
-          </span>
+          </p>
           {typeof value === 'number' && value > 1000 && <span className="text-xs text-text-muted font-mono mb-1">+</span>}
         </div>
         <p className="text-xs font-bold text-text-muted uppercase tracking-[0.15em] mt-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
