@@ -148,7 +148,7 @@ def detect_trends(product_name: str, user_id: int, batch_id: int, db: Session) -
             is_resolved=False,
         )
         db.add(alert)
-        db.commit()
+        db.flush()
         db.refresh(alert)
 
         alerts.append({

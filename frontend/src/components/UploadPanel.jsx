@@ -228,6 +228,11 @@ export default function UploadPanel() {
         success('Analysis complete! Redirecting to dashboard...')
         setTimeout(() => navigate('/'), 2000)
         break
+      case 'error':
+        setError(data.message || 'An unknown error occurred during analysis.')
+        setStreaming(false)
+        toastError(data.message || 'Analysis failed')
+        break
     }
   }
 

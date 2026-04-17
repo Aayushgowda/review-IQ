@@ -26,7 +26,7 @@ class Review(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     batch_id = Column(Integer, ForeignKey("batches.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     product_name = Column(String(255), nullable=False, index=True)
     category = Column(String(100), default="General")
     review_text = Column(Text, nullable=False)
@@ -52,7 +52,8 @@ class Review(Base):
     feat_support_sentiment = Column(String(20), default="not_mentioned")
     feat_support_confidence = Column(Float, default=0.0)
 
-    submitted_at = Column(DateTime, default=datetime.utcnow)
+    submitted_at = Column(DateTime, default=datetime.utcnow, index=True)
+
     source = Column(String(20), default="csv")  # csv/json/text
 
 

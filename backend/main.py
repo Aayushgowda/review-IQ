@@ -197,214 +197,238 @@ async def run_analysis_pipeline(
 ) -> AsyncGenerator[str, None]:
     """
     TURBO SSE streaming pipeline - 100x faster processing.
-    Uses hybrid AI (heuristic for 80%, AI for complex 20%), bulk DB operations, SQL-based trends.
     """
     import time
     start_time = time.time()
     
-    total = len(df)
-    products = df["product_name"].unique().tolist()
+    try:
+        total = len(df)
+        products = df["product_name"].unique().tolist()
 
-    # Create batch
-    batch = Batch(
-        user_id=user_id,
-        product_name=", ".join(products),
-        category=df["category"].iloc[0] if "category" in df.columns else "General",
-        source=source,
-        total_reviews=total,
-        status="processing",
-    )
-    db.add(batch)
-    db.commit()
-    db.refresh(batch)
-
-    # Event 1: Parsed
-    yield json.dumps({
-        "type": "parsed",
-        "total": total,
-        "batch_id": batch.id,
-        "products": products,
-    })
-    await asyncio.sleep(0)
-
-    # Step 2: ULTRA Preprocess (1000x faster - NO API calls)
-    reviews_list = df.to_dict(orient="records")
-    
-    if ULTRA_MODE:
-        preprocess_result = await preprocess_ultra(reviews_list)
-    elif TURBO_MODE:
-        preprocess_result = await preprocess_reviews_turbo(reviews_list)
-    else:
-        preprocess_result = await asyncio.to_thread(preprocess_reviews, reviews_list)
-    
-    clean_reviews = preprocess_result["clean"]
-
-    yield json.dumps({
-        "type": "preprocessed",
-        "total": len(clean_reviews),
-        "bot_count": preprocess_result["bot_count"],
-        "duplicate_count": preprocess_result["duplicate_count"],
-        "language_stats": preprocess_result["language_stats"],
-        "flagged_count": preprocess_result["flagged_count"],
-    })
-    await asyncio.sleep(0)
-
-    batch.bot_count = preprocess_result["bot_count"]
-    batch.flagged_count = preprocess_result["flagged_count"]
-    db.commit()
-
-    # Step 3: ULTRA AI Analysis - Pure heuristic, NO API calls (1000x faster)
-    processed = 0
-    all_review_objects = []
-    
-    if clean_reviews:
-        # Extract all texts at once
-        all_texts = [r.get("clean_text", r.get("review_text", "")) for r in clean_reviews]
-        
-        # ULTRA: Pure heuristic analysis (milliseconds for 1000 reviews)
-        if ULTRA_MODE:
-            all_results = analyze_ultra(all_texts)  # No async needed - it's instant
-        elif TURBO_MODE:
-            all_results = await analyze_batch_turbo(all_texts)
-        else:
-            # Fallback to slower chunked processing
-            all_results = []
-            for i in range(0, len(all_texts), BATCH_SIZE):
-                chunk = all_texts[i:i + BATCH_SIZE]
-                chunk_results = await asyncio.to_thread(analyze_batch, chunk)
-                all_results.extend(chunk_results)
-        
-        # Map results to review objects
-        for review_data, ai_result in zip(clean_reviews, all_results):
-            if ULTRA_MODE:
-                mapped = map_analysis_ultra(ai_result)
-            elif TURBO_MODE:
-                mapped = map_analysis_to_review_turbo(ai_result)
-            else:
-                mapped = map_analysis_to_review(ai_result)
-            
-            if review_data.get("is_bot_suspected", False):
-                mapped["is_bot_suspected"] = True
-            
-            product_name = review_data.get("product_name", "Unknown Product")
-            category = review_data.get("category", "General")
-            submitted_at = review_data.get("submitted_at")
-            if not isinstance(submitted_at, datetime):
-                submitted_at = datetime.utcnow()
-
-            review = Review(
-                batch_id=batch.id,
-                user_id=user_id,
-                product_name=product_name,
-                category=category,
-                review_text=review_data.get("review_text", ""),
-                translated_text=review_data.get("translated_text", ""),
-                original_language=review_data.get("original_language", "english"),
-                submitted_at=submitted_at,
-                source=source,
-                **mapped,
-            )
-            all_review_objects.append(review)
-        
-        # BULK INSERT - Single commit for all reviews
-        db.bulk_save_objects(all_review_objects)
+        # Create batch
+        batch = Batch(
+            user_id=user_id,
+            product_name=", ".join(products),
+            category=df["category"].iloc[0] if "category" in df.columns else "General",
+            source=source,
+            total_reviews=total,
+            status="processing",
+        )
+        db.add(batch)
         db.commit()
-        
-        processed = len(all_review_objects)
-        batch.processed_reviews = processed
-        db.commit()
-        
-        # SSE Progress Update
+        db.refresh(batch)
+
+        # Event 1: Parsed
         yield json.dumps({
-            "type": "batch_done",
-            "processed": processed,
-            "total": len(clean_reviews),
-            "percent": 100.0,
-            "latest_reviews": [
-                {
-                    "review_text": r.review_text[:100],
-                    "sentiment": r.overall_sentiment,
-                    "language": r.original_language,
-                    "is_bot": r.is_bot_suspected,
-                }
-                for r in all_review_objects[:10]
-            ],
+            "type": "parsed",
+            "total": total,
+            "batch_id": batch.id,
+            "products": products,
         })
         await asyncio.sleep(0)
 
-    # Step 4: Ensure products exist (single bulk upsert)
-    for product_name in products:
-        existing = db.query(Product).filter(
-            Product.user_id == user_id,
-            Product.name == product_name,
-        ).first()
-
-        product_reviews_count = db.query(Review).filter(
-            Review.user_id == user_id,
-            Review.product_name == product_name,
-        ).count()
-
-        if existing:
-            existing.total_reviews = product_reviews_count
-            existing.last_updated = datetime.utcnow()
-        else:
-            product_category = df[df["product_name"] == product_name]["category"].iloc[0] if "category" in df.columns else "General"
-            new_product = Product(
-                user_id=user_id,
-                name=product_name,
-                category=product_category,
-                total_reviews=product_reviews_count,
-            )
-            db.add(new_product)
-    db.commit()
-
-    # Step 5: Turbo Trend Detection (SQL-based, 100x faster)
-    yield json.dumps({
-        "type": "trends_analyzing",
-        "message": "Analyzing trends and detecting anomalies...",
-    })
-    await asyncio.sleep(0)
-
-    all_alerts = []
-    all_action_cards = []
-
-    for product_name in products:
-        if TURBO_MODE:
-            alerts = detect_trends_turbo(product_name, user_id, batch.id, db)
-        else:
-            alerts = await asyncio.to_thread(detect_trends, product_name, user_id, batch.id, db)
+        # Step 2: ULTRA Preprocess
+        reviews_list = df.to_dict(orient="records")
         
-        all_alerts.extend(alerts)
+        if ULTRA_MODE:
+            preprocess_result = await preprocess_ultra(reviews_list)
+        elif TURBO_MODE:
+            preprocess_result = await preprocess_reviews_turbo(reviews_list)
+        else:
+            preprocess_result = await asyncio.to_thread(preprocess_reviews, reviews_list)
+        
+        clean_reviews = preprocess_result["clean"]
 
-        # Generate action cards for significant alerts
-        for alert_data in alerts:
-            if alert_data["severity"] in ("critical", "high"):
-                alert_obj = db.query(Alert).filter(Alert.id == alert_data["id"]).first()
-                if alert_obj:
-                    card = await asyncio.to_thread(
-                        generate_action_card, alert_obj, user_id, db
-                    )
-                    if card:
-                        all_action_cards.append(card)
+        yield json.dumps({
+            "type": "preprocessed",
+            "total": len(clean_reviews),
+            "bot_count": preprocess_result["bot_count"],
+            "duplicate_count": preprocess_result["duplicate_count"],
+            "language_stats": preprocess_result["language_stats"],
+            "flagged_count": preprocess_result["flagged_count"],
+        })
+        await asyncio.sleep(0)
 
-    # Update batch status
-    batch.status = "completed"
-    db.commit()
-    
-    elapsed = time.time() - start_time
+        batch.bot_count = preprocess_result["bot_count"]
+        batch.flagged_count = preprocess_result["flagged_count"]
+        db.commit()
 
-    # Event 5: Complete
-    yield json.dumps({
-        "type": "complete",
-        "alerts_count": len(all_alerts),
-        "alerts": all_alerts,
-        "action_cards": all_action_cards,
-        "products": products,
-        "elapsed_seconds": round(elapsed, 2),
-        "ultra_mode": ULTRA_MODE,
-        "turbo_mode": TURBO_MODE,
-        "mode": "ULTRA" if ULTRA_MODE else ("TURBO" if TURBO_MODE else "STANDARD"),
-    })
+        # Step 3: AI Analysis (Chunked for progress updates)
+        processed = 0
+        
+        if clean_reviews:
+            UI_BATCH_SIZE = 50 
+            total_to_process = len(clean_reviews)
+            
+            # Initial progress event
+            yield json.dumps({
+                "type": "batch_done",
+                "processed": 0,
+                "total": total_to_process,
+                "percent": 0.0,
+            })
+
+            for i in range(0, total_to_process, UI_BATCH_SIZE):
+                chunk = clean_reviews[i:i + UI_BATCH_SIZE]
+                chunk_texts = [r.get("clean_text", r.get("review_text", "")) for r in chunk]
+                
+                # 1. Run Analysis
+                try:
+                    if ULTRA_MODE:
+                        chunk_results = analyze_ultra(chunk_texts)
+                    elif TURBO_MODE:
+                        chunk_results = await analyze_batch_turbo(chunk_texts)
+                    else:
+                        chunk_results = await asyncio.to_thread(analyze_batch, chunk_texts)
+                except Exception as e:
+                    print(f"Analysis error: {e}")
+                    chunk_results = analyze_ultra(chunk_texts)
+                
+                # 2. Map and Create Mappings
+                chunk_mappings = []
+                for review_data, ai_result in zip(chunk, chunk_results):
+                    if ULTRA_MODE:
+                        mapped = map_analysis_ultra(ai_result)
+                    elif TURBO_MODE:
+                        mapped = map_analysis_to_review_turbo(ai_result)
+                    else:
+                        mapped = map_analysis_to_review(ai_result)
+                    
+                    if review_data.get("is_bot_suspected", False):
+                        mapped["is_bot_suspected"] = True
+                    
+                    product_name = review_data.get("product_name", "Unknown Product")
+                    category = review_data.get("category", "General")
+                    submitted_at = review_data.get("submitted_at")
+                    if not isinstance(submitted_at, datetime):
+                        submitted_at = datetime.utcnow()
+
+                    mapping = {
+                        "batch_id": batch.id,
+                        "user_id": user_id,
+                        "product_name": product_name,
+                        "category": category,
+                        "review_text": review_data.get("review_text", ""),
+                        "translated_text": review_data.get("translated_text", ""),
+                        "original_language": review_data.get("original_language", "english"),
+                        "submitted_at": submitted_at,
+                        "source": source,
+                        **mapped,
+                    }
+                    chunk_mappings.append(mapping)
+                
+                # 3. Save chunk using bulk insert for performance
+                db.bulk_insert_mappings(Review, chunk_mappings)
+                db.commit()
+                
+                processed += len(chunk_mappings)
+                batch.processed_reviews = processed
+                db.commit()
+                
+                # 4. SSE Progress Update
+                yield json.dumps({
+                    "type": "batch_done",
+                    "processed": processed,
+                    "total": total_to_process,
+                    "percent": round((processed / total_to_process) * 100, 1),
+                    "latest_reviews": [
+                        {
+                            "review_text": m["review_text"][:100],
+                            "sentiment": m["overall_sentiment"],
+                            "language": m["original_language"],
+                            "is_bot": m.get("is_bot_suspected", False),
+                        }
+                        for m in chunk_mappings[:5]
+                    ],
+                })
+                await asyncio.sleep(0.01)
+
+
+        # Commit all reviews
+        db.commit()
+
+        # Step 4: Ensure products exist
+        from sqlalchemy import func
+        counts = db.query(Review.product_name, func.count(Review.id)).filter(
+            Review.user_id == user_id,
+            Review.product_name.in_(products)
+        ).group_by(Review.product_name).all()
+        counts_map = {name: count for name, count in counts}
+
+        existing_products_map = {
+            p.name: p for p in db.query(Product).filter(Product.user_id == user_id).all()
+        }
+        
+        for product_name in products:
+            product_reviews_count = counts_map.get(product_name, 0)
+            if product_name in existing_products_map:
+                existing = existing_products_map[product_name]
+                existing.total_reviews = product_reviews_count
+                existing.last_updated = datetime.utcnow()
+            else:
+                product_rows = df[df["product_name"] == product_name]
+                product_category = product_rows["category"].iloc[0] if len(product_rows) > 0 and "category" in product_rows.columns else "General"
+                new_product = Product(
+                    user_id=user_id,
+                    name=product_name,
+                    category=product_category,
+                    total_reviews=product_reviews_count,
+                )
+                db.add(new_product)
+        db.commit()
+
+        # Step 5: Trend Detection
+        yield json.dumps({
+            "type": "trends_analyzing",
+            "message": "Analyzing trends and detecting anomalies...",
+        })
+        await asyncio.sleep(0)
+
+        all_alerts = []
+        all_action_cards = []
+
+        for product_name in products:
+            if ULTRA_MODE or TURBO_MODE:
+                alerts = await asyncio.to_thread(detect_trends_turbo, product_name, user_id, batch.id, db)
+            else:
+                alerts = await asyncio.to_thread(detect_trends, product_name, user_id, batch.id, db)
+            
+            all_alerts.extend(alerts)
+
+            for alert_data in alerts:
+                if alert_data["severity"] in ("critical", "high"):
+                    alert_obj = db.query(Alert).filter(Alert.id == alert_data["id"]).first()
+                    if alert_obj:
+                        card = await asyncio.to_thread(generate_action_card, alert_obj, user_id, db)
+                        if card:
+                            all_action_cards.append(card)
+
+        # Final cleanup and status update
+        db.commit()
+        batch.status = "completed"
+        db.commit()
+        
+        elapsed = time.time() - start_time
+        yield json.dumps({
+            "type": "complete",
+            "alerts_count": len(all_alerts),
+            "alerts": all_alerts,
+            "action_cards": all_action_cards,
+            "products": products,
+            "elapsed_seconds": round(elapsed, 2),
+            "mode": "ULTRA" if ULTRA_MODE else ("TURBO" if TURBO_MODE else "STANDARD"),
+        })
+
+    except Exception as e:
+        import traceback
+        print(f"Pipeline error: {e}")
+        traceback.print_exc()
+        db.rollback()
+        batch.status = "failed"
+        db.commit()
+        yield json.dumps({"type": "error", "message": str(e)})
+
+
 
 
 @app.post("/api/upload/csv-stream")

@@ -265,28 +265,40 @@ async def _ai_analysis_batch(reviews_subset: List[tuple]) -> List[Dict]:
     # Try Gemini first
     if GEMINI_API_KEY:
         try:
-            loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_analyze_with_gemini_turbo, prompt)
-                results = await asyncio.wait_for(
-                    loop.run_in_executor(None, future.result),
-                    timeout=AI_TIMEOUT
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            # Use to_thread for the blocking API call
+            response = await asyncio.to_thread(
+                model.generate_content,
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.1,
+                    max_output_tokens=4096,
+                    response_mime_type="application/json",
                 )
+            )
+            results = safe_json_parse(response.text)
         except Exception:
             pass
     
     # Fallback to Groq
     if not results and GROQ_API_KEY:
         try:
-            loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_analyze_with_groq_turbo, prompt)
-                results = await asyncio.wait_for(
-                    loop.run_in_executor(None, future.result),
-                    timeout=AI_TIMEOUT
-                )
+            client = Groq(api_key=GROQ_API_KEY)
+            # Use to_thread for the blocking API call
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {"role": "system", "content": "Return only JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.1,
+                max_tokens=2048,
+            )
+            results = safe_json_parse(response.choices[0].message.content)
         except Exception:
             pass
+
     
     if not results:
         # All AI failed, use heuristic for these too

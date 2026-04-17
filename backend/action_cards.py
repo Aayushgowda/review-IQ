@@ -1,9 +1,11 @@
 """
 ReviewIQ — Action Cards Generator
 Uses Gemini AI to generate actionable business decisions from alerts.
+In ULTRA_MODE (default), skips API calls entirely for instant generation.
 """
 
 import json
+import concurrent.futures
 from typing import Dict, Any, Optional
 
 from sqlalchemy.orm import Session
@@ -13,6 +15,14 @@ from ai_engine import safe_json_parse
 import google.generativeai as genai
 from groq import Groq
 import os
+
+# Respect ULTRA_MODE - skip all API calls when enabled
+ULTRA_MODE = os.getenv("ULTRA_MODE", "true").lower() == "true"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+
+# Action card API timeout (seconds) - short so we don't block the stream
+ACTION_CARD_TIMEOUT = 5
 
 
 def _build_action_prompt(alert: Alert) -> str:
@@ -58,6 +68,8 @@ def _parse_action_response(text: str) -> Dict:
 def generate_action_card(alert: Alert, user_id: int, db: Session) -> Optional[Dict[str, Any]]:
     """
     Generate an AI-powered action card for a detected alert.
+    In ULTRA_MODE (default=true), uses instant heuristic generation — no API calls.
+    In non-ultra mode, tries Gemini/Groq with a short timeout to avoid blocking.
 
     Args:
         alert: Alert model instance
@@ -67,40 +79,54 @@ def generate_action_card(alert: Alert, user_id: int, db: Session) -> Optional[Di
     Returns:
         Action card dict or None if generation fails
     """
-    prompt = _build_action_prompt(alert)
-
     action_data = None
 
-    # Try Gemini first
-    try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.3,
-                max_output_tokens=2048,
-            ),
-        )
-        action_data = _parse_action_response(response.text)
-    except Exception as e:
-        print(f"⚠️  Gemini action card failed ({e}), trying Groq...")
+    # ULTRA MODE: Skip all API calls for instant generation
+    if ULTRA_MODE:
+        print("⚡ Ultra mode: using heuristic action card (instant)")
+        action_data = _default_action_card(alert)
+    else:
+        prompt = _build_action_prompt(alert)
 
-    # Fallback to Groq
-    if not action_data:
-        try:
-            client = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
-            response = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[
-                    {"role": "system", "content": "You are a senior product manager. Return only valid JSON."},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.3,
-                max_tokens=2048,
-            )
-            action_data = _parse_action_response(response.choices[0].message.content)
-        except Exception as e2:
-            print(f"❌ Groq action card also failed ({e2})")
+        # Try Gemini with strict timeout
+        if GEMINI_API_KEY:
+            def _call_gemini():
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                return model.generate_content(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.3,
+                        max_output_tokens=2048,
+                    ),
+                )
+            try:
+                with concurrent.futures.ThreadPoolExecutor() as ex:
+                    future = ex.submit(_call_gemini)
+                    response = future.result(timeout=ACTION_CARD_TIMEOUT)
+                action_data = _parse_action_response(response.text)
+            except Exception as e:
+                print(f"⚠️  Gemini action card failed/timed out ({type(e).__name__}), trying Groq...")
+
+        # Fallback to Groq with strict timeout
+        if not action_data and GROQ_API_KEY:
+            def _call_groq():
+                client = Groq(api_key=GROQ_API_KEY)
+                return client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=[
+                        {"role": "system", "content": "You are a senior product manager. Return only valid JSON."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.3,
+                    max_tokens=2048,
+                )
+            try:
+                with concurrent.futures.ThreadPoolExecutor() as ex:
+                    future = ex.submit(_call_groq)
+                    response = future.result(timeout=ACTION_CARD_TIMEOUT)
+                action_data = _parse_action_response(response.choices[0].message.content)
+            except Exception as e2:
+                print(f"❌ Groq action card also failed ({type(e2).__name__}).")
 
     # Fallback to default if both fail
     if not action_data:
@@ -127,7 +153,7 @@ def generate_action_card(alert: Alert, user_id: int, db: Session) -> Optional[Di
         is_dismissed=False,
     )
     db.add(card)
-    db.commit()
+    db.flush()
     db.refresh(card)
 
     return {

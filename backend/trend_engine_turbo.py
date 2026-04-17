@@ -85,10 +85,9 @@ def detect_trends_turbo(product_name: str, user_id: int, batch_id: int, db: Sess
         "window_size": WINDOW_SIZE
     }).fetchone()
     
-    if not result or result.total_count < 20:
+    total_count = getattr(result, "total_count", 0) or 0
+    if not result or total_count < 20:
         return []
-    
-    alerts = []
     
     feature_data = [
         ("battery_life", result.curr_battery_neg, result.curr_battery_total, result.prev_battery_neg, result.prev_battery_total),
@@ -98,6 +97,10 @@ def detect_trends_turbo(product_name: str, user_id: int, batch_id: int, db: Sess
         ("price_value", result.curr_price_neg, result.curr_price_total, result.prev_price_neg, result.prev_price_total),
         ("customer_support", result.curr_sup_neg, result.curr_sup_total, result.prev_sup_neg, result.prev_sup_total),
     ]
+
+    alert_objs = []
+
+    alerts_data = []
     
     for feature_name, curr_neg, curr_total, prev_neg, prev_total in feature_data:
         if curr_total < 3:  # Skip if too few mentions
@@ -143,7 +146,7 @@ def detect_trends_turbo(product_name: str, user_id: int, batch_id: int, db: Sess
             f"Classification: {classification}."
         )
         
-        alert = Alert(
+        alert_obj = Alert(
             batch_id=batch_id,
             user_id=user_id,
             product_name=product_name,
@@ -157,8 +160,10 @@ def detect_trends_turbo(product_name: str, user_id: int, batch_id: int, db: Sess
             classification=classification,
             is_resolved=False,
         )
-        db.add(alert)
-        alerts.append({
+        db.add(alert_obj)
+        alert_objs.append(alert_obj)
+        
+        alerts_data.append({
             "id": None,  # Will be set after commit
             "product_name": product_name,
             "feature_name": feature_name,
@@ -171,14 +176,14 @@ def detect_trends_turbo(product_name: str, user_id: int, batch_id: int, db: Sess
             "classification": classification,
         })
     
-    if alerts:
-        db.commit()
+    if alert_objs:
+        db.flush()
         # Refresh to get IDs
-        for i, alert in enumerate(alerts):
-            db.refresh(alert)
-            alerts[i]["id"] = alert.id
+        for i, alert_obj in enumerate(alert_objs):
+            db.refresh(alert_obj)
+            alerts_data[i]["id"] = alert_obj.id
     
-    return alerts
+    return alerts_data
 
 
 def get_time_series_turbo(product_name: str, user_id: int, db: Session) -> Dict:
@@ -319,13 +324,14 @@ def calculate_health_score_turbo(product_name: str, user_id: int, db: Session) -
         "user_id": user_id
     }).fetchone()
     
-    if not result or result.total == 0:
+    total = getattr(result, "total", 0) or 0
+    if not result or total == 0:
         return 100
     
-    total = result.total
-    
     # Sentiment score (40 points)
-    sentiment_ratio = result.pos_count / total if total > 0 else 0.5
+    pos_count = getattr(result, "pos_count", 0) or 0
+    sentiment_ratio = pos_count / total if total > 0 else 0.5
+
     sentiment_score = sentiment_ratio * 40
     
     # Feature score (40 points)
