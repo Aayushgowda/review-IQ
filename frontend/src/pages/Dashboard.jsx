@@ -3,7 +3,7 @@ import { useProducts } from '../context/ProductContext'
 import axios from 'axios'
 import {
   MessageSquare, Bot, AlertTriangle, Shield, Heart,
-  TrendingUp, Globe, Activity, LayoutGrid, Zap
+  TrendingUp, Globe, Activity, LayoutGrid, Zap, Plug, RefreshCw
 } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -14,6 +14,7 @@ import ActionCard from '../components/ActionCard'
 import AlertBanner from '../components/AlertBanner'
 import ReviewTable from '../components/ReviewTable'
 import SkeletonLoader from '../components/SkeletonLoader'
+import LiveSources from '../components/LiveSources'
 import { useNavigate } from 'react-router-dom'
 
 const SENTIMENT_COLORS = ['#00FFD1', '#FF4B4B', '#7C3AED']
@@ -381,6 +382,17 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Live Sources Section */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-syne font-black text-white uppercase tracking-[0.3em] flex items-center gap-3">
+          <Plug size={18} className="text-teal" />
+          Live Sources
+        </h3>
+        <div className="glass-card p-5">
+          <LiveSources />
+        </div>
+      </div>
     </div>
   )
 }

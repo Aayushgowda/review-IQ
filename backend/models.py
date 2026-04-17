@@ -119,3 +119,18 @@ class ActionCard(Base):
     urgency = Column(String(20), default="monitor")  # immediate/this_week/monitor
     is_dismissed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class RetailerAPI(Base):
+    __tablename__ = "retailer_apis"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    retailer_name = Column(String(255), nullable=False)
+    api_url = Column(String(500), nullable=False)
+    api_key = Column(String(255), nullable=False)
+    is_active = Column(Boolean, default=True)
+    last_fetched_at = Column(DateTime, nullable=True)
+    total_fetched = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    status = Column(String(20), default="pending")  # connected/error/pending

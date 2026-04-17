@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Search, ChevronLeft, ChevronRight, AlertTriangle, Bot, Zap } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, AlertTriangle, Bot, Zap, Plug } from 'lucide-react'
 import ReviewDrawer from './ReviewDrawer'
 
 const filterTabs = [
@@ -9,6 +9,7 @@ const filterTabs = [
   { key: 'neutral', label: 'Neutral' },
   { key: 'flagged', label: 'Flagged' },
   { key: 'bots', label: 'Bots' },
+  { key: 'api', label: 'API Source' },
 ]
 
 const sentimentBadge = {
@@ -106,6 +107,11 @@ export default function ReviewTable({ reviews, total, page, totalPages, onPageCh
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
+                        {review.source === 'retailer_api' && (
+                          <span className="w-5 h-5 rounded bg-teal/15 flex items-center justify-center" title="API Source">
+                            <Plug size={11} className="text-teal" />
+                          </span>
+                        )}
                         {review.is_bot_suspected && (
                           <span className="w-5 h-5 rounded bg-brand-amber/15 flex items-center justify-center" title="Bot suspected">
                             <Bot size={11} className="text-brand-amber" />

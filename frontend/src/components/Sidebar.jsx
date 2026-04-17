@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import { useProducts } from '../context/ProductContext'
 import {
   LayoutDashboard, Upload, TrendingUp, MessageSquare,
-  AlertTriangle, LogOut, Sparkles
+  AlertTriangle, LogOut, Sparkles, Plug
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import axios from 'axios'
@@ -11,6 +11,7 @@ import axios from 'axios'
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/upload', icon: Upload, label: 'Upload' },
+  { to: '/retailer-connect', icon: Plug, label: 'API Connect' },
   { to: '/trends', icon: TrendingUp, label: 'Trends' },
   { to: '/reviews', icon: MessageSquare, label: 'Reviews' },
   { to: '/alerts', icon: AlertTriangle, label: 'Alerts' },
@@ -21,6 +22,7 @@ export default function Sidebar() {
   const { selectedProduct } = useProducts()
   const location = useLocation()
   const [alertCount, setAlertCount] = useState(0)
+  const [apiConnectionCount, setApiConnectionCount] = useState(0)
 
   useEffect(() => {
     if (selectedProduct) {
@@ -32,6 +34,18 @@ export default function Sidebar() {
         .catch(() => {})
     }
   }, [selectedProduct, location.pathname])
+
+  useEffect(() => {
+    // Fetch API connection count
+    const token = localStorage.getItem('token')
+    axios.get('/api/retailer/list', {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => {
+        setApiConnectionCount(res.data.apis?.length || 0)
+      })
+      .catch(() => {})
+  }, [location.pathname])
 
   return (
     <aside className="fixed top-0 left-0 h-full w-64 bg-sidebar-bg border-r border-border-dark flex flex-col z-50">
@@ -71,6 +85,11 @@ export default function Sidebar() {
               {label === 'Alerts' && alertCount > 0 && (
                 <span className="ml-auto bg-brand-red text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
                   {alertCount}
+                </span>
+              )}
+              {label === 'API Connect' && apiConnectionCount > 0 && (
+                <span className="ml-auto bg-teal text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center animate-pulse">
+                  {apiConnectionCount}
                 </span>
               )}
             </NavLink>

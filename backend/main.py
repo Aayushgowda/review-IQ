@@ -12,6 +12,7 @@ import json
 import asyncio
 from datetime import datetime
 from typing import Optional, AsyncGenerator
+import httpx
 
 import pandas as pd
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Query, status
@@ -22,7 +23,7 @@ from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel
 
 from database import init_db, get_db
-from models import User, Review, Batch, Alert, Product, ActionCard
+from models import User, Review, Batch, Alert, Product, ActionCard, RetailerAPI
 from auth import (
     get_password_hash, verify_password, create_access_token,
     get_current_user, oauth2_scheme
@@ -912,6 +913,423 @@ def resolve_alert(
     alert.is_resolved = True
     db.commit()
     return {"status": "resolved", "id": alert_id}
+
+
+# ============== RETAILER API CONNECT ==============
+
+class RetailerConnectRequest(BaseModel):
+    retailer_name: str
+    api_url: str
+    api_key: str
+
+class RetailerConnectResponse(BaseModel):
+    success: bool
+    retailer_name: Optional[str] = None
+    total_reviews: Optional[int] = None
+    error: Optional[str] = None
+
+async def test_retailer_api(api_url: str, api_key: str) -> dict:
+    """Test retailer API connection and fetch basic info."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Test with limit=1 to verify connection
+            response = await client.get(
+                f"{api_url}?api_key={api_key}&limit=1",
+                headers={'User-Agent': 'ReviewIQ/1.0'}
+            )
+            
+            if response.status_code == 401:
+                return {"success": False, "error": "Unauthorized - Invalid API key"}
+            
+            if response.status_code != 200:
+                return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+            
+            data = response.json()
+            
+            if not data.get('success'):
+                return {"success": False, "error": data.get('error', 'Invalid response format')}
+            
+            return {
+                "success": True,
+                "retailer": data.get('retailer', 'Unknown'),
+                "product": data.get('product', 'Unknown'),
+                "total": data.get('total', 0)
+            }
+            
+    except httpx.TimeoutException:
+        return {"success": False, "error": "Connection timeout - API not responding"}
+    except httpx.RequestError as e:
+        return {"success": False, "error": f"Connection failed: {str(e)}"}
+    except Exception as e:
+        return {"success": False, "error": f"Unexpected error: {str(e)}"}
+
+async def fetch_all_reviews_from_api(api_url: str, api_key: str) -> list:
+    """Fetch all reviews from retailer API with pagination."""
+    all_reviews = []
+    offset = 0
+    limit = 500  # Max allowed by PHP API
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        while True:
+            try:
+                response = await client.get(
+                    f"{api_url}?api_key={api_key}&limit={limit}&offset={offset}",
+                    headers={'User-Agent': 'ReviewIQ/1.0'}
+                )
+                
+                if response.status_code != 200:
+                    break
+                    
+                data = response.json()
+                
+                if not data.get('success') or not data.get('reviews'):
+                    break
+                
+                reviews = data['reviews']
+                all_reviews.extend(reviews)
+                
+                # If we got fewer than requested, we're done
+                if len(reviews) < limit:
+                    break
+                    
+                offset += limit
+                
+            except Exception:
+                break
+    
+    return all_reviews
+
+@app.post("/api/retailer/connect", response_model=RetailerConnectResponse)
+async def connect_retailer_api(
+    request: RetailerConnectRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Connect a new retailer API."""
+    
+    # Validate URL format
+    if not request.api_url.startswith(('http://', 'https://')):
+        return RetailerConnectResponse(
+            success=False,
+            error="API URL must start with http:// or https://"
+        )
+    
+    # Test API connection
+    test_result = await test_retailer_api(request.api_url, request.api_key)
+    
+    if not test_result["success"]:
+        return RetailerConnectResponse(
+            success=False,
+            error=test_result["error"]
+        )
+    
+    # Save to database
+    retailer_api = RetailerAPI(
+        user_id=user.id,
+        retailer_name=request.retailer_name,
+        api_url=request.api_url,
+        api_key=request.api_key,
+        status="connected"
+    )
+    
+    db.add(retailer_api)
+    db.commit()
+    db.refresh(retailer_api)
+    
+    return RetailerConnectResponse(
+        success=True,
+        retailer_name=request.retailer_name,
+        total_reviews=test_result.get("total", 0)
+    )
+
+@app.get("/api/retailer/list")
+async def list_retailer_apis(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all connected retailer APIs for the user."""
+    apis = (
+        db.query(RetailerAPI)
+        .filter(RetailerAPI.user_id == user.id)
+        .order_by(RetailerAPI.created_at.desc())
+        .all()
+    )
+    
+    result = []
+    for api in apis:
+        result.append({
+            "id": api.id,
+            "retailer_name": api.retailer_name,
+            "api_url": api.api_url,
+            "is_active": api.is_active,
+            "status": api.status,
+            "last_fetched_at": api.last_fetched_at.isoformat() if api.last_fetched_at else None,
+            "total_fetched": api.total_fetched,
+            "created_at": api.created_at.isoformat()
+        })
+    
+    return {"apis": result}
+
+@app.delete("/api/retailer/{api_id}")
+async def delete_retailer_api(
+    api_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a connected retailer API."""
+    api = db.query(RetailerAPI).filter(
+        RetailerAPI.id == api_id,
+        RetailerAPI.user_id == user.id
+    ).first()
+    
+    if not api:
+        raise HTTPException(status_code=404, detail="API not found")
+    
+    db.delete(api)
+    db.commit()
+    
+    return {"success": True, "message": "API connection removed"}
+
+async def run_api_analysis_pipeline(
+    reviews: list,
+    user_id: int,
+    retailer_name: str,
+    db: Session
+) -> AsyncGenerator[str, None]:
+    """Run full analysis pipeline for API reviews with SSE streaming."""
+    
+    yield json.dumps({
+        "type": "pipeline_started",
+        "message": f"Starting analysis of {len(reviews)} reviews from {retailer_name}...",
+    })
+    
+    # Create batch
+    batch = Batch(
+        user_id=user_id,
+        source="api",
+        filename=f"{retailer_name}_api_fetch",
+        status="processing",
+        total_reviews=len(reviews)
+    )
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+    
+    yield json.dumps({
+        "type": "batch_created",
+        "batch_id": batch.id,
+        "total_reviews": len(reviews)
+    })
+    
+    # Convert reviews to DataFrame
+    df = pd.DataFrame(reviews)
+    
+    # Add missing columns if needed
+    if 'category' not in df.columns:
+        df['category'] = 'API Import'
+    if 'original_language' not in df.columns:
+        df['original_language'] = 'english'
+    
+    # Step 1: Preprocessing
+    yield json.dumps({
+        "type": "preprocessing",
+        "message": "Preprocessing reviews...",
+    })
+    
+    if ULTRA_MODE:
+        preprocess_result = await asyncio.to_thread(preprocess_reviews_turbo, reviews)
+    elif TURBO_MODE:
+        preprocess_result = await asyncio.to_thread(preprocess_reviews_turbo, reviews)
+    else:
+        preprocess_result = await asyncio.to_thread(preprocess_reviews, reviews)
+    
+    clean_reviews = preprocess_result["clean"]
+    
+    yield json.dumps({
+        "type": "preprocessing_complete",
+        "clean_reviews": len(clean_reviews),
+        "bots_detected": len(preprocess_result["bots"])
+    })
+    
+    # Step 2: AI Analysis
+    yield json.dumps({
+        "type": "ai_analysis",
+        "message": "Analyzing sentiments with AI...",
+    })
+    
+    if ULTRA_MODE:
+        analysis_result = await asyncio.to_thread(analyze_batch_ultra, clean_reviews)
+    elif TURBO_MODE:
+        analysis_result = await asyncio.to_thread(analyze_batch_turbo, clean_reviews)
+    else:
+        analysis_result = await asyncio.to_thread(analyze_batch, clean_reviews)
+    
+    # Save reviews
+    for i, review_data in enumerate(clean_reviews):
+        analysis = analysis_result[i]
+        
+        review = Review(
+            batch_id=batch.id,
+            user_id=user_id,
+            product_name=review_data.get('product_name', 'Unknown'),
+            category=review_data.get('category', 'API Import'),
+            review_text=review_data['review_text'],
+            translated_text=review_data.get('translated_text'),
+            original_language=review_data.get('original_language', 'english'),
+            overall_sentiment=analysis['overall_sentiment'],
+            is_sarcastic=analysis['is_sarcastic'],
+            is_bot_suspected=analysis['is_bot_suspected'],
+            flagged_for_human_review=analysis['flagged_for_human_review'],
+            flag_reason=analysis['flag_reason'],
+            feat_battery_sentiment=analysis['features']['battery_life']['sentiment'],
+            feat_battery_confidence=analysis['features']['battery_life']['confidence'],
+            feat_build_sentiment=analysis['features']['build_quality']['sentiment'],
+            feat_build_confidence=analysis['features']['build_quality']['confidence'],
+            feat_packaging_sentiment=analysis['features']['packaging']['sentiment'],
+            feat_packaging_confidence=analysis['features']['packaging']['confidence'],
+            feat_delivery_sentiment=analysis['features']['delivery_speed']['sentiment'],
+            feat_delivery_confidence=analysis['features']['delivery_speed']['confidence'],
+            feat_price_sentiment=analysis['features']['price_value']['sentiment'],
+            feat_price_confidence=analysis['features']['price_value']['confidence'],
+            feat_support_sentiment=analysis['features']['customer_support']['sentiment'],
+            feat_support_confidence=analysis['features']['customer_support']['confidence'],
+        )
+        db.add(review)
+    
+    db.commit()
+    
+    yield json.dumps({
+        "type": "ai_analysis_complete",
+        "reviews_analyzed": len(clean_reviews)
+    })
+    
+    # Step 3: Trend Detection
+    yield json.dumps({
+        "type": "trends_analyzing",
+        "message": "Detecting trends and anomalies...",
+    })
+    
+    all_alerts = []
+    all_action_cards = []
+    
+    # Get unique products
+    products = df['product_name'].unique()
+    
+    for product_name in products:
+        if ULTRA_MODE or TURBO_MODE:
+            alerts = await asyncio.to_thread(detect_trends_turbo, product_name, user_id, batch.id, db)
+        else:
+            alerts = await asyncio.to_thread(detect_trends, product_name, user_id, batch.id, db)
+        
+        all_alerts.extend(alerts)
+        
+        for alert_data in alerts:
+            if alert_data["severity"] in ("critical", "high"):
+                alert_obj = db.query(Alert).filter(Alert.id == alert_data["id"]).first()
+                if alert_obj:
+                    card = await asyncio.to_thread(generate_action_card, alert_obj, user_id, db)
+                    if card:
+                        all_action_cards.append(card)
+    
+    yield json.dumps({
+        "type": "trends_complete",
+        "alerts_found": len(all_alerts),
+        "action_cards": len(all_action_cards)
+    })
+    
+    # Final status update
+    batch.status = "completed"
+    db.commit()
+    
+    yield json.dumps({
+        "type": "pipeline_complete",
+        "message": f"Successfully analyzed {len(clean_reviews)} reviews from {retailer_name}",
+        "total_reviews": len(clean_reviews),
+        "alerts": len(all_alerts),
+        "action_cards": len(all_action_cards)
+    })
+
+@app.post("/api/retailer/{api_id}/fetch")
+async def fetch_from_retailer_api(
+    api_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Fetch and analyze reviews from a connected retailer API."""
+    
+    # Get API connection
+    api = db.query(RetailerAPI).filter(
+        RetailerAPI.id == api_id,
+        RetailerAPI.user_id == user.id,
+        RetailerAPI.is_active == True
+    ).first()
+    
+    if not api:
+        raise HTTPException(status_code=404, detail="API connection not found")
+    
+    # Update status
+    api.status = "fetching"
+    db.commit()
+    
+    try:
+        # Fetch all reviews
+        reviews = await fetch_all_reviews_from_api(api.api_url, api.api_key)
+        
+        if not reviews:
+            api.status = "error"
+            api.last_fetched_at = datetime.utcnow()
+            db.commit()
+            
+            return EventSourceResponse(
+                run_api_analysis_pipeline([], user.id, api.retailer_name, db)
+            )
+        
+        # Run analysis pipeline
+        response = EventSourceResponse(
+            run_api_analysis_pipeline(reviews, user.id, api.retailer_name, db)
+        )
+        
+        # Update API stats
+        api.status = "connected"
+        api.last_fetched_at = datetime.utcnow()
+        api.total_fetched += len(reviews)
+        db.commit()
+        
+        return response
+        
+    except Exception as e:
+        api.status = "error"
+        api.last_fetched_at = datetime.utcnow()
+        db.commit()
+        
+        raise HTTPException(status_code=500, detail=f"Failed to fetch reviews: {str(e)}")
+
+@app.get("/api/retailer/{api_id}/status")
+async def get_retailer_api_status(
+    api_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get status of a connected retailer API."""
+    
+    api = db.query(RetailerAPI).filter(
+        RetailerAPI.id == api_id,
+        RetailerAPI.user_id == user.id
+    ).first()
+    
+    if not api:
+        raise HTTPException(status_code=404, detail="API not found")
+    
+    return {
+        "id": api.id,
+        "retailer_name": api.retailer_name,
+        "api_url": api.api_url,
+        "status": api.status,
+        "is_active": api.is_active,
+        "last_fetched_at": api.last_fetched_at.isoformat() if api.last_fetched_at else None,
+        "total_fetched": api.total_fetched,
+        "created_at": api.created_at.isoformat()
+    }
 
 
 @app.get("/api/action-cards/{product_name}")

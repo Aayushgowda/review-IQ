@@ -11,6 +11,7 @@ import Upload from './pages/Upload'
 import Trends from './pages/Trends'
 import Reviews from './pages/Reviews'
 import Alerts from './pages/Alerts'
+import RetailerConnect from './pages/RetailerConnect'
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth()
@@ -93,6 +94,16 @@ export default function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <AnimatedPage><Upload /></AnimatedPage>
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/retailer-connect"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <AnimatedPage><RetailerConnect /></AnimatedPage>
                 </AppLayout>
               </ProtectedRoute>
             }
