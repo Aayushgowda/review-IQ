@@ -31,7 +31,33 @@ ReviewIQ is an AI-powered platform that ingests customer reviews (CSV/JSON/text)
 
 ## 🚀 Quick Start
 
-### 1. Backend Setup
+### Option 1: One-Command Start (Recommended)
+
+Use the provided script to start both backend and frontend automatically:
+
+```bash
+# Make script executable (first time only)
+chmod +x start.sh
+
+# Start both services
+./start.sh
+```
+
+This will:
+- Auto-check and setup virtual environment if missing
+- Auto-install frontend dependencies if missing
+- Start backend on `http://localhost:8000`
+- Start frontend on `http://localhost:5173`
+- Show colored logs from both services
+- Press `Ctrl+C` to stop both services cleanly
+
+---
+
+### Option 2: Manual Setup
+
+If you prefer to run services separately:
+
+#### 1. Backend Setup
 
 ```bash
 cd backend
@@ -50,7 +76,7 @@ python synthetic_data.py
 python main.py
 ```
 
-### 2. Frontend Setup
+#### 2. Frontend Setup
 
 ```bash
 cd frontend
@@ -58,7 +84,7 @@ npm install
 npm run dev
 ```
 
-### 3. Open the App
+### Open the App
 
 - Frontend: [http://localhost:5173](http://localhost:5173)
 - Backend API: [http://localhost:8000/docs](http://localhost:8000/docs)
@@ -78,6 +104,8 @@ npm run dev
 
 ```
 reviewiq/
+├── start.sh                 # One-command start script (recommended)
+├── package.json             # Root npm config with concurrent scripts
 ├── backend/
 │   ├── main.py              # FastAPI routes + SSE streaming
 │   ├── models.py            # SQLAlchemy ORM models
