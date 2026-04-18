@@ -8,8 +8,8 @@
  */
 
 // ============== CONFIGURATION ==============
-$API_KEY = "your_secure_api_key_here"; // Change this!
-$CSV_FILE = "reviews.csv"; // Your reviews CSV file
+$API_KEY = "RQ_qwertysdfghjklmnbvcxsdfghjkvbn"; // Change this!
+$CSV_FILE = "reviewiq_rich_demo.csv"; // Your reviews CSV file
 $DEFAULT_LIMIT = 50;
 $MAX_LIMIT = 500;
 $LOG_FILE = "requests_log.txt";
